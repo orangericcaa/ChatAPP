@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class User:
-    """用户"""
+    """"""
 
     class Status(Enum):
         """用户在线状态"""
