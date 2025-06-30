@@ -9,7 +9,7 @@ import page_error
 import page_finishi_loging
 from control import *
 
-
+#test123
 class WinGUI(Tk):
     """登录界面实现"""
     widget_dic: Dict[str, Widget] = {}
