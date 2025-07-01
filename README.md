@@ -31,7 +31,7 @@
 #### 核心功能模块
 - **`Communication.py`** (20%) - 通信模块
 - **`control.py`** (13%) - 控制器模块
-- **`buptchat.py`** (9%) - 主聊天程序
+- **`main.py`** (9%) - 主聊天程序
 - **`hkb.py`** (8%) - 用户管理模块
 - **`windows_11.py`** (9%) - Windows 11界面适配
 - **`windows_final.py`** (9%) - 最终界面版本

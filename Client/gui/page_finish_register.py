@@ -90,6 +90,6 @@ def run():
     win.mainloop()
 
     app = QApplication(sys.argv)
-    bupt_chat=BuptChat('kb', '1429099037@qq.com')
-    init_after_login(bupt_chat)
+    chat=main('pr', '3170194169@qq.com')
+    init_after_login(chat)
     sys.exit(app.exec_())

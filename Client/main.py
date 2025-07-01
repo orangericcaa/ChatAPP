@@ -158,8 +158,10 @@ class main(QMainWindow, Ui_MainWindow):
         """
         初始化用户界面的方法
         """
-        self.setWindowTitle('buptchat')
-        self.setWindowIcon(QIcon('buptchat.png'))
+        self.setWindowTitle('chat')
+        icon_path = os.path.join(os.path.dirname(__file__), '..', 'resources', 'chat.png')
+        icon_path = os.path.abspath(icon_path)
+        self.setWindowIcon(QIcon(icon_path))
         # self.front_update_friend_ls()
         self.show()
 
