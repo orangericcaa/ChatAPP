@@ -70,14 +70,14 @@ font-family:宋体;mso-ascii-font-family:"Times New Roman";mso-hansi-font-family
 font-family:"Times New Roman",serif;mso-fareast-font-family:宋体;mso-bidi-theme-font:
 minor-bidi'><o:p></o:p></span></p>"""
     message = MIMEText(mail_html, 'html', 'utf-8')
-    message['From'] = 'Server <jinyi.xia@foxmail.com>'
-    message['To'] = f'<{email}>'
+    message['From'] = '202695135@qq.com'
+    message['To'] = email
     message['Subject'] = Header("验证码", 'utf-8')
     retval = True
     try:
         server = smtplib.SMTP_SSL('smtp.qq.com')
-        server.login('jinyi.xia@foxmail.com', 'owkqtmqtphhpdhhi')
-        server.sendmail('jinyi.xia@foxmail.com', [email], message.as_string())
+        server.login('202695135@qq.com', 'apfimosnwxpfbidg')
+        server.sendmail('202695135@qq.com', [email], message.as_string())
         server.quit()
     except:
         retval = False #False
