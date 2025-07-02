@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 连接测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            border: 1px solid #ddd;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chat APP API 连接测试</h1>
+    
+    <div class="test-section">
+        <h3>1. 测试基础连接</h3>
+        <button onclick="testConnection()">测试服务器连接</button>
+        <div id="connection-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>2. 测试登录API</h3>
+        <button onclick="testLogin()">测试登录 (alice@test.com)</button>
+        <div id="login-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>3. 测试用户API</h3>
+        <button onclick="testGetUsers()">获取用户列表</button>
+        <button onclick="testSearchUsers()">搜索用户</button>
+        <div id="users-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>4. 测试好友API</h3>
+        <button onclick="testGetFriends()">获取好友列表</button>
+        <div id="friends-result" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3001/api/v1';
+        let authToken = null;
+
+        function displayResult(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.textContent = JSON.stringify(data, null, 2);
+            element.className = isError ? 'result error' : 'result success';
+        }
+
+        async function apiRequest(endpoint, options = {}) {
+            const url = `${API_BASE_URL}${endpoint}`;
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+            };
+
+            try {
+                const response = await fetch(url, {
+                    headers,
+                    ...options
+                });
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || '请求失败');
+                }
+                
+                return data;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        async function testConnection() {
+            try {
+                const response = await fetch('http://localhost:3001');
+                if (response.ok) {
+                    displayResult('connection-result', { 
+                        status: 'success', 
+                        message: '服务器连接正常',
+                        url: 'http://localhost:3001'
+                    });
+                } else {
+                    throw new Error('服务器响应异常');
+                }
+            } catch (error) {
+                displayResult('connection-result', { 
+                    status: 'error', 
+                    message: error.message,
+                    tip: '请确保后端服务器已启动 (node server.js)'
+                }, true);
+            }
+        }
+
+        async function testLogin() {
+            try {
+                const result = await apiRequest('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ 
+                        email: 'alice@test.com', 
+                        password: '123456' 
+                    })
+                });
+                
+                authToken = result.token;
+                displayResult('login-result', {
+                    status: 'success',
+                    message: '登录成功',
+                    user: result.user,
+                    token: result.token
+                });
+            } catch (error) {
+                displayResult('login-result', {
+                    status: 'error',
+                    message: error.message
+                }, true);
+            }
+        }
+
+        async function testGetUsers() {
+            try {
+                if (!authToken) {
+                    throw new Error('请先登录');
+                }
+                
+                const result = await apiRequest('/users');
+                displayResult('users-result', {
+                    status: 'success',
+                    message: '获取用户列表成功',
+                    users: result.users
+                });
+            } catch (error) {
+                displayResult('users-result', {
+                    status: 'error',
+                    message: error.message
+                }, true);
+            }
+        }
+
+        async function testSearchUsers() {
+            try {
+                if (!authToken) {
+                    throw new Error('请先登录');
+                }
+                
+                const result = await apiRequest('/users/search?q=bob');
+                displayResult('users-result', {
+                    status: 'success',
+                    message: '搜索用户成功',
+                    searchQuery: 'bob',
+                    users: result.users
+                });
+            } catch (error) {
+                displayResult('users-result', {
+                    status: 'error',
+                    message: error.message
+                }, true);
+            }
+        }
+
+        async function testGetFriends() {
+            try {
+                if (!authToken) {
+                    throw new Error('请先登录');
+                }
+                
+                const result = await apiRequest('/friends');
+                displayResult('friends-result', {
+                    status: 'success',
+                    message: '获取好友列表成功',
+                    friends: result.friends
+                });
+            } catch (error) {
+                displayResult('friends-result', {
+                    status: 'error',
+                    message: error.message
+                }, true);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>验证码功能测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px 10px 5px 0;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { 
+            background: #6c757d; 
+            cursor: not-allowed; 
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .log {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e9ecef;
+        }
+        .countdown {
+            color: #6c757d;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>ChatAPP 验证码功能测试</h1>
+    
+    <div class="test-section">
+        <h3>🔐 发送验证码测试</h3>
+        <div class="form-group">
+            <label for="email">邮箱地址:</label>
+            <input type="email" id="email" placeholder="请输入邮箱地址" value="test@example.com">
+        </div>
+        <button onclick="sendVerificationCode()" id="sendCodeBtn">发送验证码</button>
+        <div id="sendCodeStatus" class="status" style="display: none;"></div>
+        <div id="sendCodeLog" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>📝 注册流程测试</h3>
+        <div class="form-group">
+            <label for="regEmail">邮箱:</label>
+            <input type="email" id="regEmail" placeholder="注册邮箱" value="test@example.com">
+        </div>
+        <div class="form-group">
+            <label for="regName">昵称:</label>
+            <input type="text" id="regName" placeholder="用户昵称" value="测试用户">
+        </div>
+        <div class="form-group">
+            <label for="regPassword">密码:</label>
+            <input type="password" id="regPassword" placeholder="密码（至少6位）" value="123456">
+        </div>
+        <div class="form-group">
+            <label for="regCode">验证码:</label>
+            <input type="text" id="regCode" placeholder="6位验证码" maxlength="6">
+        </div>
+        <button onclick="testRegister()" id="registerBtn">注册账号</button>
+        <div id="registerStatus" class="status" style="display: none;"></div>
+        <div id="registerLog" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔑 验证码登录测试</h3>
+        <div class="form-group">
+            <label for="loginEmail">邮箱:</label>
+            <input type="email" id="loginEmail" placeholder="登录邮箱" value="alice@test.com">
+        </div>
+        <div class="form-group">
+            <label for="loginCode">验证码:</label>
+            <input type="text" id="loginCode" placeholder="6位验证码" maxlength="6">
+        </div>
+        <button onclick="sendLoginCode()" id="sendLoginCodeBtn">发送登录验证码</button>
+        <button onclick="testLoginWithCode()" id="loginCodeBtn">验证码登录</button>
+        <div id="loginCodeStatus" class="status" style="display: none;"></div>
+        <div id="loginCodeLog" class="log"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3001/api/v1';
+        let countdown = 0;
+        let countdownTimer = null;
+
+        function showStatus(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status ${type}`;
+            element.style.display = 'block';
+        }
+
+        function log(elementId, message) {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            element.textContent += `[${timestamp}] ${message}\n`;
+            element.scrollTop = element.scrollHeight;
+        }
+
+        function startCountdown(seconds) {
+            countdown = seconds;
+            const btn = document.getElementById('sendCodeBtn');
+            
+            function updateButton() {
+                if (countdown > 0) {
+                    btn.textContent = `重新发送 (${countdown}s)`;
+                    btn.disabled = true;
+                    countdown--;
+                    countdownTimer = setTimeout(updateButton, 1000);
+                } else {
+                    btn.textContent = '发送验证码';
+                    btn.disabled = false;
+                }
+            }
+            updateButton();
+        }
+
+        async function apiRequest(endpoint, options = {}) {
+            const url = `${API_BASE_URL}${endpoint}`;
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            try {
+                const response = await fetch(url, {
+                    headers,
+                    ...options
+                });
+                
+                const data = await response.json();
+                
+                return {
+                    success: response.ok,
+                    status: response.status,
+                    data: data
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error.message,
+                    data: null
+                };
+            }
+        }
+
+        async function sendVerificationCode() {
+            const email = document.getElementById('email').value.trim();
+            
+            if (!email) {
+                showStatus('sendCodeStatus', '请输入邮箱地址', 'error');
+                return;
+            }
+
+            showStatus('sendCodeStatus', '正在发送验证码...', 'info');
+            log('sendCodeLog', `开始为 ${email} 发送验证码`);
+
+            const result = await apiRequest('/auth/send-code', {
+                method: 'POST',
+                body: JSON.stringify({ email })
+            });
+
+            log('sendCodeLog', `响应状态: ${result.status}`);
+            log('sendCodeLog', `响应数据: ${JSON.stringify(result.data, null, 2)}`);
+
+            if (result.success && result.data.success) {
+                showStatus('sendCodeStatus', '验证码发送成功！请检查邮箱（包括垃圾邮件文件夹）', 'success');
+                log('sendCodeLog', '✅ 验证码发送成功');
+                log('sendCodeLog', '📧 请检查您的邮箱（可能在垃圾邮件文件夹中）');
+                
+                // 显示开发环境下的验证码
+                if (result.data.dev_code) {
+                    log('sendCodeLog', `🔑 开发环境验证码: ${result.data.dev_code}`);
+                    // 自动填充到相关输入框
+                    document.getElementById('regCode').value = result.data.dev_code;
+                    showStatus('sendCodeStatus', `真实邮件已发送！开发环境验证码: ${result.data.dev_code}（已自动填充）`, 'success');
+                }
+                
+                startCountdown(60);
+            } else {
+                const errorMsg = result.data?.error || result.error || '发送失败';
+                showStatus('sendCodeStatus', `发送失败: ${errorMsg}`, 'error');
+                log('sendCodeLog', `❌ 发送失败: ${errorMsg}`);
+                
+                // 提供详细的错误诊断信息
+                if (errorMsg.includes('Python')) {
+                    log('sendCodeLog', '💡 可能的解决方案:');
+                    log('sendCodeLog', '   1. 确保已安装Python');
+                    log('sendCodeLog', '   2. 确保Python在系统PATH中');
+                    log('sendCodeLog', '   3. 检查send_email.py文件是否存在');
+                } else if (errorMsg.includes('邮件')) {
+                    log('sendCodeLog', '💡 邮件发送失败可能原因:');
+                    log('sendCodeLog', '   1. 网络连接问题');
+                    log('sendCodeLog', '   2. SMTP服务器配置问题');
+                    log('sendCodeLog', '   3. 邮箱地址无效');
+                }
+            }
+        }
+
+        async function testRegister() {
+            const email = document.getElementById('regEmail').value.trim();
+            const name = document.getElementById('regName').value.trim();
+            const password = document.getElementById('regPassword').value;
+            const verificationCode = document.getElementById('regCode').value.trim();
+
+            if (!email || !name || !password || !verificationCode) {
+                showStatus('registerStatus', '请填写完整信息', 'error');
+                return;
+            }
+
+            showStatus('registerStatus', '正在注册...', 'info');
+            log('registerLog', `开始注册: ${email}`);
+
+            const result = await apiRequest('/auth/register', {
+                method: 'POST',
+                body: JSON.stringify({ email, name, password, verificationCode })
+            });
+
+            log('registerLog', `响应状态: ${result.status}`);
+            log('registerLog', `响应数据: ${JSON.stringify(result.data, null, 2)}`);
+
+            if (result.success && result.data.success) {
+                showStatus('registerStatus', '注册成功！', 'success');
+                log('registerLog', '✅ 注册成功');
+                log('registerLog', `用户ID: ${result.data.user.id}`);
+            } else {
+                const errorMsg = result.data?.error || result.error || '注册失败';
+                showStatus('registerStatus', `注册失败: ${errorMsg}`, 'error');
+                log('registerLog', `❌ 注册失败: ${errorMsg}`);
+            }
+        }
+
+        async function sendLoginCode() {
+            const email = document.getElementById('loginEmail').value.trim();
+            
+            if (!email) {
+                showStatus('loginCodeStatus', '请输入邮箱地址', 'error');
+                return;
+            }
+
+            showStatus('loginCodeStatus', '正在发送登录验证码...', 'info');
+            log('loginCodeLog', `为 ${email} 发送登录验证码`);
+
+            const result = await apiRequest('/auth/send-code', {
+                method: 'POST',
+                body: JSON.stringify({ email })
+            });
+
+            log('loginCodeLog', `响应: ${JSON.stringify(result.data, null, 2)}`);
+
+            if (result.success && result.data.success) {
+                showStatus('loginCodeStatus', '验证码发送成功！', 'success');
+                log('loginCodeLog', '✅ 登录验证码发送成功');
+                
+                if (result.data.dev_code) {
+                    document.getElementById('loginCode').value = result.data.dev_code;
+                    showStatus('loginCodeStatus', `验证码: ${result.data.dev_code}`, 'success');
+                }
+            } else {
+                const errorMsg = result.data?.error || result.error || '发送失败';
+                showStatus('loginCodeStatus', `发送失败: ${errorMsg}`, 'error');
+                log('loginCodeLog', `❌ 发送失败: ${errorMsg}`);
+            }
+        }
+
+        async function testLoginWithCode() {
+            const email = document.getElementById('loginEmail').value.trim();
+            const code = document.getElementById('loginCode').value.trim();
+
+            if (!email || !code) {
+                showStatus('loginCodeStatus', '请输入邮箱和验证码', 'error');
+                return;
+            }
+
+            showStatus('loginCodeStatus', '正在验证登录...', 'info');
+            log('loginCodeLog', `验证码登录: ${email}`);
+
+            const result = await apiRequest('/auth/login-with-code', {
+                method: 'POST',
+                body: JSON.stringify({ email, code })
+            });
+
+            log('loginCodeLog', `响应: ${JSON.stringify(result.data, null, 2)}`);
+
+            if (result.success && result.data.success) {
+                showStatus('loginCodeStatus', '登录成功！', 'success');
+                log('loginCodeLog', '✅ 验证码登录成功');
+                log('loginCodeLog', `用户: ${result.data.user.name} (${result.data.user.email})`);
+            } else {
+                const errorMsg = result.data?.error || result.error || '登录失败';
+                showStatus('loginCodeStatus', `登录失败: ${errorMsg}`, 'error');
+                log('loginCodeLog', `❌ 登录失败: ${errorMsg}`);
+            }
+        }
+
+        // 页面加载时自动填充邮箱
+        window.onload = function() {
+            const testEmail = 'test@example.com';
+            document.getElementById('email').value = testEmail;
+            document.getElementById('regEmail').value = testEmail;
+        };
+    </script>
+</body>
+</html>
