@@ -52,6 +52,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # ------------------- Pydantic 数据模型 -------------------
 
+class UserProfileRequest(BaseModel):
+    email: EmailStr
+
 class UpdateAvatarRequest(BaseModel):
     email: EmailStr
     avatar_url: str
@@ -63,86 +66,62 @@ class UpdateInfoRequest(BaseModel):
 class SearchUserRequest(BaseModel):
     keyword: str
 
-class AddFriendRequest(BaseModel):
+class FriendRequest(BaseModel):
     inviter: EmailStr
     invitee: EmailStr
 
-class FriendActionRequest(BaseModel):
-    inviter: EmailStr
-    invitee: EmailStr
-
-class DeleteFriendRequest(BaseModel):
-    email1: EmailStr
-    email2: EmailStr
-
-# ------------------- 用户相关接口 -------------------
+# ------------------- 用户信息相关接口 -------------------
 
 @app.get("/api/v1/user/profile")
-def get_profile(email: EmailStr = Query(...)):
-    username = database.find_user(DB_PATH, email)
-    if not username:
+def get_user_profile(email: EmailStr = Query(...)):
+    user = database.find_user(DB_PATH, email)
+    if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    return api_response(True, {"email": email, "name": username}, "获取用户信息成功")
+    return api_response(True, {"email": user["email"], "name": user["name"], "avatar": user.get("avatar", "")}, "获取用户信息成功")
 
-@app.put("/api/v1/user/avatar")
+@app.post("/api/v1/user/avatar")
 def update_avatar(data: UpdateAvatarRequest):
-    # 这里只做示例，实际应保存avatar_url到数据库
-    # 可扩展：database.update_user_avatar(DB_PATH, data.email, data.avatar_url)
-    return api_response(True, {"avatar_url": data.avatar_url}, "头像更新成功")
+    database.update_avatar(DB_PATH, data.email, data.avatar_url)
+    return api_response(True, None, "头像更新成功")
 
-@app.put("/api/v1/user/info")
+@app.post("/api/v1/user/info")
 def update_info(data: UpdateInfoRequest):
-    database.update_user_name(DB_PATH, data.email, data.name)
-    return api_response(True, None, "信息更新成功")
+    database.update_user_info(DB_PATH, data.email, data.name)
+    return api_response(True, None, "用户信息更新成功")
 
 @app.get("/api/v1/user/search")
-def search_user(keyword: str = Query(...)):
-    # 简单实现：模糊搜索邮箱或用户名
-    # 可扩展：实现 database.search_user(DB_PATH, keyword)
-    # 这里只返回全部用户做演示
-    import sqlite3
-    result = []
-    with sqlite3.connect(DB_PATH) as db_conn:
-        cursor = db_conn.cursor()
-        cursor.execute("SELECT email, username FROM UserTable WHERE email LIKE ? OR username LIKE ?", (f"%{keyword}%", f"%{keyword}%"))
-        for row in cursor.fetchall():
-            result.append({"email": row[0], "name": row[1]})
-    return api_response(True, {"users": result}, "搜索用户成功")
+def search_user(keyword: str = Query("")):
+    users = database.search_users(DB_PATH, keyword)
+    return api_response(True, {"users": users}, "搜索用户成功")
 
 # ------------------- 好友管理相关接口 -------------------
 
 @app.get("/api/v1/friends")
 def get_friends(email: EmailStr = Query(...)):
     friends = database.get_friend_list(DB_PATH, email)
-    return api_response(True, {"friends": [{"email": f[0], "name": f[1]} for f in friends]}, "获取好友列表成功")
+    return api_response(True, {"friends": friends}, "获取好友列表成功")
 
 @app.post("/api/v1/friends/add")
-def add_friend(data: AddFriendRequest):
-    if data.inviter == data.invitee:
-        raise HTTPException(status_code=400, detail="不能添加自己为好友")
-    database.raise_friend_request(DB_PATH, data.inviter, data.invitee)
+def add_friend(data: FriendRequest):
+    database.add_friend(DB_PATH, data.inviter, data.invitee)
     return api_response(True, None, "好友请求已发送")
+
+@app.post("/api/v1/friends/delete")
+def delete_friend(data: FriendRequest):
+    database.del_friend(DB_PATH, data.inviter, data.invitee)
+    return api_response(True, None, "好友已删除")
 
 @app.get("/api/v1/friends/requests")
 def get_friend_requests(email: EmailStr = Query(...)):
-    requests = database.get_friend_request(DB_PATH, email)
+    requests = database.get_friend_requests(DB_PATH, email)
     return api_response(True, {"requests": requests}, "获取好友请求成功")
 
 @app.post("/api/v1/friends/accept")
-def accept_friend(data: FriendActionRequest):
-    database.add_friend(DB_PATH, data.inviter, data.invitee)
-    return api_response(True, None, "已添加为好友")
+def accept_friend(data: FriendRequest):
+    database.accept_friend(DB_PATH, data.inviter, data.invitee)
+    return api_response(True, None, "已同意好友请求")
 
 @app.post("/api/v1/friends/reject")
-def reject_friend(data: FriendActionRequest):
-    # 这里只做删除请求，实际可扩展
-    import sqlite3
-    with sqlite3.connect(DB_PATH) as db_conn:
-        db_conn.execute("DELETE FROM FriendRequest WHERE inviter=? AND invitee=?", (data.inviter, data.invitee))
-        db_conn.commit()
+def reject_friend(data: FriendRequest):
+    database.reject_friend(DB_PATH, data.inviter, data.invitee)
     return api_response(True, None, "已拒绝好友请求")
-
-@app.post("/api/v1/friends/delete")
-def delete_friend(data: DeleteFriendRequest):
-    database.del_friend(DB_PATH, data.email1, data.email2)
-    return api_response(True, None, "好友已删除")

@@ -15,6 +15,12 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 # 数据库路径（如有需要可用数据库持久化通知）
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "server.db"))
 
+# 导入数据库相关函数（如有需要）
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import database as database
+
+database.init(DB_PATH)
+
 # FastAPI 实例
 app = FastAPI()
 
@@ -49,65 +55,26 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # ------------------- 数据模型 -------------------
 
 class Notification(BaseModel):
-    id: int
     user: EmailStr
     content: str
-    timestamp: float
-    read: bool = False
+    type: str = "info"
+    timestamp: float = time.time()
 
 class MarkReadRequest(BaseModel):
     user: EmailStr
     notification_id: int
 
-class NotificationSettings(BaseModel):
+class NotificationSettingsRequest(BaseModel):
     user: EmailStr
-    enable_push: bool = True
+    enable: bool
 
-# ------------------- 内存通知存储（可替换为数据库） -------------------
-
-notifications = []
-notifications_lock = threading.Lock()
-notification_id_counter = 1
-
-user_settings = {}
-user_settings_lock = threading.Lock()
-
-# ------------------- HTTP API 路由 -------------------
-
-@app.get("/api/v1/notifications")
-def get_notifications(user: EmailStr = Query(...)):
-    with notifications_lock:
-        user_notices = [n for n in notifications if n.user == user]
-    return api_response(True, {"notifications": user_notices}, "获取通知列表成功")
-
-@app.post("/api/v1/mark-read")
-def mark_read(data: MarkReadRequest):
-    with notifications_lock:
-        for n in notifications:
-            if n.id == data.notification_id and n.user == data.user:
-                n.read = True
-                break
-    return api_response(True, None, "通知已标记为已读")
-
-@app.get("/api/v1/settings")
-def get_settings(user: EmailStr = Query(...)):
-    with user_settings_lock:
-        settings = user_settings.get(user, {"enable_push": True})
-    return api_response(True, {"settings": settings}, "获取通知设置成功")
-
-@app.post("/api/v1/settings")
-def update_settings(data: NotificationSettings):
-    with user_settings_lock:
-        user_settings[data.user] = {"enable_push": data.enable_push}
-    return api_response(True, None, "设置已更新")
-
-# ------------------- WebSocket 实时通知 -------------------
+# ------------------- WebSocket连接管理 -------------------
 
 active_connections = {}
 active_connections_lock = threading.Lock()
 
 @app.websocket("/ws/notification")
-async def notification_ws(websocket: WebSocket):
+async def notification_websocket(websocket: WebSocket):
     await websocket.accept()
     user_id = None
     try:
@@ -122,34 +89,32 @@ async def notification_ws(websocket: WebSocket):
 
         while True:
             data = await websocket.receive_json()
-            # 支持客户端主动拉取通知
-            if data.get("action") == "fetch":
-                with notifications_lock:
-                    user_notices = [n for n in notifications if n.user == user_id]
-                await websocket.send_json({"type": "notifications", "notifications": user_notices})
+            # 这里可以根据data内容处理通知，如推送、已读等
+            # 示例：收到"ping"回复"pong"
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong", "timestamp": time.time()})
     except WebSocketDisconnect:
         if user_id:
             with active_connections_lock:
                 if user_id in active_connections:
                     del active_connections[user_id]
 
-# ------------------- 通知推送工具函数 -------------------
+# ------------------- HTTP API 路由 -------------------
 
-def push_notification(user: str, content: str):
-    global notification_id_counter
-    with notifications_lock:
-        n = Notification(
-            id=notification_id_counter,
-            user=user,
-            content=content,
-            timestamp=time.time(),
-            read=False
-        )
-        notifications.append(n)
-        notification_id_counter += 1
-    # 实时推送
-    with active_connections_lock:
-        ws = active_connections.get(user)
-    if ws:
-        import asyncio
-        asyncio.create_task(ws.send_json({"type": "notification", "notification": n.dict()}))
+@app.get("/api/v1/notifications")
+def get_notifications(user: EmailStr = Query(...)):
+    # 从数据库获取通知列表
+    notifications = database.get_notifications(DB_PATH, user)
+    return api_response(True, {"notifications": notifications}, "获取通知成功")
+
+@app.post("/api/v1/mark-read")
+def mark_read(data: MarkReadRequest):
+    # 标记通知为已读
+    database.mark_notification_read(DB_PATH, data.user, data.notification_id)
+    return api_response(True, None, "通知已标记为已读")
+
+@app.post("/api/v1/settings")
+def update_settings(data: NotificationSettingsRequest):
+    # 更新通知设置
+    database.update_notification_settings(DB_PATH, data.user, data.enable)
+    return api_response(True, None, "通知设置已更新")

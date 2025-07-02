@@ -16,14 +16,18 @@ from pydantic import BaseModel, EmailStr, constr
 
 from dotenv import load_dotenv
 
+import jwt  # 新增
+from datetime import datetime, timedelta  # 新增
+
 # 加载.env配置
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-SECRET_KEY = os.getenv("SECRET_KEY", "thisisaverysecretkey12345678").encode()
+SECRET_KEY = os.getenv("SECRET_KEY", "thisisaverysecretkey12345678")
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.qq.com")
 VERICODE = int(os.getenv("VERICODE", 600))
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 60 * 24 * 7))  # 默认7天
 
 # 数据库路径（可根据实际情况调整）
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "server.db"))
@@ -89,6 +93,19 @@ class CodeLoginRequest(BaseModel):
 class CodeRequest(BaseModel):
     email: EmailStr
 
+# ------------------- JWT 相关函数 -------------------
+
+def create_jwt_token(email: str, username: str = "", expire_minutes: int = JWT_EXPIRE_MINUTES):
+    expire = datetime.utcnow() + timedelta(minutes=expire_minutes)
+    payload = {
+        "sub": email,
+        "username": username,
+        "exp": expire,
+        "iat": datetime.utcnow(),
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    return token
+
 # ------------------- 邮件发送函数 -------------------
 
 def send_email(email: str, vericode: str) -> bool:
@@ -128,15 +145,19 @@ def register(data: RegisterRequest):
         raise HTTPException(status_code=400, detail="邮箱已注册")
     pwdhash = hashlib.sha256(data.password.encode('utf-8')).hexdigest()
     database.register_user(DB_PATH, data.email, data.username, pwdhash)
-    return api_response(True, None, "注册成功")
+    # 注册成功后直接生成token返回
+    token = create_jwt_token(data.email, data.username)
+    return api_response(True, {"token": token}, "注册成功")
 
 @app.post("/api/v1/auth/login")
 def login(data: LoginRequest):
     pwdhash = database.get_pwdhash(DB_PATH, data.email)
     if not pwdhash or pwdhash != hashlib.sha256(data.password.encode('utf-8')).hexdigest():
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
-    # 可在此处生成token并返回
-    return api_response(True, None, "登录成功")
+    # 登录成功生成token
+    username = database.get_username(DB_PATH, data.email) or ""
+    token = create_jwt_token(data.email, username)
+    return api_response(True, {"token": token}, "登录成功")
 
 @app.post("/api/v1/auth/login-with-code")
 def login_with_code(data: CodeLoginRequest):
@@ -146,7 +167,9 @@ def login_with_code(data: CodeLoginRequest):
             raise HTTPException(status_code=400, detail="验证码无效或已过期")
     if not database.find_user(DB_PATH, data.email):
         raise HTTPException(status_code=401, detail="用户不存在")
-    return api_response(True, None, "登录成功")
+    username = database.get_username(DB_PATH, data.email) or ""
+    token = create_jwt_token(data.email, username)
+    return api_response(True, {"token": token}, "登录成功")
 
 # 可选：token校验、刷新等接口
 @app.post("/api/v1/auth/verify")

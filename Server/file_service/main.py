@@ -1,6 +1,5 @@
 import os
 import sys
-import uuid
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -45,48 +44,47 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"success": False, "data": None, "message": str(exc)},
     )
 
-def save_upload_file(upload_file: UploadFile, subdir: str):
-    ext = os.path.splitext(upload_file.filename)[-1]
-    filename = f"{uuid.uuid4().hex}{ext}"
-    dir_path = os.path.join(UPLOAD_DIR, subdir)
-    os.makedirs(dir_path, exist_ok=True)
-    file_path = os.path.join(dir_path, filename)
-    with open(file_path, "wb") as f:
-        f.write(upload_file.file.read())
-    return f"{subdir}/{filename}"
-
-# ------------------- 文件上传接口 -------------------
+# ------------------- 文件上传与下载接口 -------------------
 
 @app.post("/api/v1/upload/image")
 async def upload_image(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="请上传图片文件")
-    rel_path = save_upload_file(file, "images")
-    url = f"/api/v1/download?path={rel_path}"
-    return api_response(True, {"url": url}, "图片上传成功")
+    try:
+        filename = f"img_{int(os.times()[4]*1000)}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        return api_response(True, {"url": f"/api/v1/download?filename={filename}"}, "图片上传成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图片上传失败: {e}")
 
 @app.post("/api/v1/upload/voice")
 async def upload_voice(file: UploadFile = File(...)):
-    if not file.content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="请上传音频文件")
-    rel_path = save_upload_file(file, "voices")
-    url = f"/api/v1/download?path={rel_path}"
-    return api_response(True, {"url": url}, "音频上传成功")
+    try:
+        filename = f"voice_{int(os.times()[4]*1000)}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        return api_response(True, {"url": f"/api/v1/download?filename={filename}"}, "语音上传成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"语音上传失败: {e}")
 
 @app.post("/api/v1/upload/video")
 async def upload_video(file: UploadFile = File(...)):
-    if not file.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="请上传视频文件")
-    rel_path = save_upload_file(file, "videos")
-    url = f"/api/v1/download?path={rel_path}"
-    return api_response(True, {"url": url}, "视频上传成功")
-
-# ------------------- 文件下载接口 -------------------
+    try:
+        filename = f"video_{int(os.times()[4]*1000)}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        return api_response(True, {"url": f"/api/v1/download?filename={filename}"}, "视频上传成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"视频上传失败: {e}")
 
 @app.get("/api/v1/download")
-async def download_file(path: str = Query(...)):
-    abs_path = os.path.join(UPLOAD_DIR, path)
-    if not os.path.isfile(abs_path):
+async def download_file(filename: str = Query(...)):
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
-    filename = os.path.basename(abs_path)
-    return FileResponse(abs_path, filename=filename)
+    return FileResponse(file_path, filename=filename)

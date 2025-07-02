@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import threading
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -52,120 +51,110 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"success": False, "data": None, "message": str(exc)},
     )
 
-# ------------------- 聊天消息数据模型 -------------------
+# ------------------- Pydantic 数据模型 -------------------
 
-class ChatMessage(BaseModel):
+class MessageSendRequest(BaseModel):
     sender: EmailStr
     receiver: EmailStr
     content: str
-    timestamp: float = None
-    type: str = "text"
+    type: str = "text"  # text/image/audio
+    timestamp: int = int(time.time() * 1000)
 
-class DeleteMessageRequest(BaseModel):
-    message_id: int
+class MessageQueryRequest(BaseModel):
+    user1: EmailStr
+    user2: EmailStr
+    limit: int = 100
 
-class MarkReadRequest(BaseModel):
-    sender: EmailStr
-    receiver: EmailStr
-
-# ------------------- WebSocket连接管理 -------------------
-
-active_connections = {}
-active_connections_lock = threading.Lock()
-
-# ------------------- HTTP API 路由 -------------------
+# ------------------- 聊天消息接口 -------------------
 
 @app.get("/api/v1/messages")
-def get_messages(user1: EmailStr = Query(...), user2: EmailStr = Query(...), limit: int = 100):
-    messages = database.get_messages(DB_PATH, user1, user2, limit)
-    data = [
-        {
-            "sender": m[0],
-            "receiver": m[1],
-            "content": m[2],
-            "timestamp": m[3],
-            "type": m[4]
-        } for m in messages
-    ]
-    return api_response(True, data, "获取消息成功")
+def get_messages(user1: str = Query(...), user2: str = Query(...), limit: int = Query(100)):
+    """
+    获取两用户之间的消息
+    """
+    try:
+        messages = database.get_messages(DB_PATH, user1, user2, limit)
+        return api_response(True, messages, "获取消息成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取消息失败: {e}")
 
 @app.post("/api/v1/send")
-def send_message(data: ChatMessage):
-    database.save_message(DB_PATH, data.sender, data.receiver, data.content, data.timestamp or time.time(), data.type)
-    # WebSocket推送
-    with active_connections_lock:
-        ws = active_connections.get(data.receiver)
-    msg = {
-        "type": data.type,
-        "sender": data.sender,
-        "content": data.content,
-        "timestamp": data.timestamp or time.time()
-    }
-    if ws:
-        import asyncio
-        asyncio.create_task(ws.send_json(msg))
-    return api_response(True, None, "消息已发送")
+def send_message(data: MessageSendRequest):
+    """
+    发送消息
+    """
+    try:
+        database.save_message(
+            DB_PATH,
+            data.sender,
+            data.receiver,
+            data.content,
+            data.type,
+            data.timestamp
+        )
+        return api_response(True, None, "消息发送成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"消息发送失败: {e}")
 
 @app.get("/api/v1/history")
-def get_history(user1: EmailStr = Query(...), user2: EmailStr = Query(...), limit: int = 100):
-    messages = database.get_messages(DB_PATH, user1, user2, limit)
-    data = [
-        {
-            "sender": m[0],
-            "receiver": m[1],
-            "content": m[2],
-            "timestamp": m[3],
-            "type": m[4]
-        } for m in messages
-    ]
-    return api_response(True, data, "获取历史消息成功")
+def get_history(user: str = Query(...), limit: int = Query(100)):
+    """
+    获取用户历史消息
+    """
+    try:
+        messages = database.get_user_history(DB_PATH, user, limit)
+        return api_response(True, messages, "获取历史消息成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取历史消息失败: {e}")
 
 @app.post("/api/v1/delete")
-def delete_message(data: DeleteMessageRequest):
-    # 这里只做演示，实际应实现数据库删除
-    # 可扩展：database.delete_message(DB_PATH, data.message_id)
-    return api_response(True, None, "消息删除接口待实现")
+def delete_message(message_id: int = Query(...)):
+    """
+    删除消息
+    """
+    try:
+        database.delete_message(DB_PATH, message_id)
+        return api_response(True, None, "消息删除成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"消息删除失败: {e}")
 
 @app.post("/api/v1/mark-read")
-def mark_read(data: MarkReadRequest):
-    # 这里只做演示，实际应实现已读标记
-    return api_response(True, None, "消息已标记为已读")
+def mark_read(message_id: int = Query(...)):
+    """
+    标记消息为已读
+    """
+    try:
+        database.mark_message_read(DB_PATH, message_id)
+        return api_response(True, None, "消息标记为已读")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"标记已读失败: {e}")
 
 # ------------------- WebSocket 聊天 -------------------
+
+active_connections = {}
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
-    user_id = None
+    user = None
     try:
-        # 首条消息应包含用户身份
-        init_data = await websocket.receive_json()
-        user_id = init_data.get("user_id")
-        if not user_id:
-            await websocket.close()
-            return
-        with active_connections_lock:
-            active_connections[user_id] = websocket
-
         while True:
             data = await websocket.receive_json()
-            msg_type = data.get("type", "text")
-            receiver = data.get("receiver")
-            msg = {
-                "type": msg_type,
-                "sender": user_id,
-                "content": data.get("content"),
-                "timestamp": data.get("timestamp", time.time())
-            }
-            # 保存消息
-            database.save_message(DB_PATH, user_id, receiver, msg["content"], msg["timestamp"], msg_type)
-            # 推送给对方
-            with active_connections_lock:
-                ws = active_connections.get(receiver)
-            if ws:
-                await ws.send_json(msg)
+            action = data.get("action")
+            if action == "register":
+                user = data.get("user")
+                if user:
+                    active_connections[user] = websocket
+            elif action == "send":
+                to_user = data.get("to")
+                message = data.get("message")
+                if to_user in active_connections:
+                    await active_connections[to_user].send_json({
+                        "from": user,
+                        "message": message
+                    })
     except WebSocketDisconnect:
-        if user_id:
-            with active_connections_lock:
-                if user_id in active_connections:
-                    del active_connections[user_id]
+        if user and user in active_connections:
+            del active_connections[user]
+    except Exception as e:
+        await websocket.close()
