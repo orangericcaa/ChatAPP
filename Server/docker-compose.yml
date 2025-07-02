@@ -1,0 +1,62 @@
+version: "3.8"
+
+services:
+  auth_service:
+    build: ./auth_service
+    container_name: chatapp_auth_service
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./auth_service:/app
+      - ./db:/app/../db
+    restart: unless-stopped
+
+  main_api:
+    build: ./main_api
+    container_name: chatapp_main_api
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./main_api:/app
+      - ./db:/app/../db
+    restart: unless-stopped
+
+  chat_service:
+    build: ./chat_service
+    container_name: chatapp_chat_service
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./chat_service:/app
+      - ./db:/app/../db
+    restart: unless-stopped
+
+  file_service:
+    build: ./file_service
+    container_name: chatapp_file_service
+    ports:
+      - "3004:3004"
+    volumes:
+      - ./file_service:/app
+      - ./uploads:/app/../uploads
+    restart: unless-stopped
+
+  rtc_service:
+    build: ./rtc_service
+    container_name: chatapp_rtc_service
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./rtc_service:/app
+      - ./db:/app/../db
+    restart: unless-stopped
+
+  notification_service:
+    build: ./notification_service
+    container_name: chatapp_notification_service
+    ports:
+      - "3006:3006"
+    volumes:
+      - ./notification_service:/app
+      - ./db:/app/../db
+    restart: unless-stopped

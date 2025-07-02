@@ -1,0 +1,8 @@
+# requirements.txt
+PyQt5==5.15.7
+opencv-python==4.8.0.74
+pycryptodome==3.19.0
+numpy==1.24.3
+
+# 安装命令
+pip install -r requirements.txt
