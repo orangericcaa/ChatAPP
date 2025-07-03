@@ -6,11 +6,33 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exception_handlers import RequestValidationError
 from dotenv import load_dotenv
 
+# 自动判断运行环境并设置路径
+def get_paths():
+    current_dir = os.path.dirname(__file__)
+    
+    # 判断是否在容器内运行（容器内通常有这些特征）
+    is_container = os.path.exists('/app') and os.path.exists('/common')
+    
+    if is_container:
+        # 容器内路径
+        return {
+            'env_path': '/common/.env',
+            'upload_dir': '/uploads'
+        }
+    else:
+        # 本地开发路径
+        return {
+            'env_path': os.path.join(current_dir, '..', 'common', '.env'),
+            'upload_dir': os.path.join(current_dir, '..', 'uploads')
+        }
+
+paths = get_paths()
+
 # 加载.env配置
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+load_dotenv(dotenv_path=paths['env_path'])
 
 # 文件存储目录
-UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
+UPLOAD_DIR = os.path.abspath(paths['upload_dir'])
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # FastAPI 实例
@@ -88,3 +110,36 @@ async def download_file(filename: str = Query(...)):
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(file_path, filename=filename)
+
+@app.post("/api/v1/upload/avatar")
+async def upload_avatar(file: UploadFile = File(...)):
+    try:
+        filename = f"avatar_{int(os.times()[4]*1000)}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        return api_response(True, {"url": f"/api/v1/download?filename={filename}"}, "头像上传成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"头像上传失败: {e}")
+
+@app.post("/api/v1/upload/file")
+async def upload_file(file: UploadFile = File(...)):
+    try:
+        filename = f"file_{int(os.times()[4]*1000)}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        return api_response(True, {"url": f"/api/v1/download?filename={filename}"}, "文件上传成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件上传失败: {e}")
+
+# 健康检查接口
+@app.get("/health")
+async def health_check():
+    return api_response(True, {"status": "healthy", "upload_dir": UPLOAD_DIR}, "文件服务运行正常")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=3004)

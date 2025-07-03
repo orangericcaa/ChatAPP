@@ -1,5 +1,3 @@
-#version: "3.8"
-
 services:
   auth_service:
     build: ./auth_service
@@ -8,7 +6,8 @@ services:
       - "3002:3002"
     volumes:
       - ./auth_service:/app
-      - ./db:/app/../db
+      - ./common:/common
+      - ./db:/db
     restart: unless-stopped
 
   main_api:
@@ -18,7 +17,8 @@ services:
       - "3001:3001"
     volumes:
       - ./main_api:/app
-      - ./db:/app/../db
+      - ./common:/common
+      - ./db:/db
     restart: unless-stopped
 
   chat_service:
@@ -28,7 +28,8 @@ services:
       - "3003:3003"
     volumes:
       - ./chat_service:/app
-      - ./db:/app/../db
+      - ./common:/common
+      - ./db:/db
     restart: unless-stopped
 
   file_service:
@@ -38,7 +39,8 @@ services:
       - "3004:3004"
     volumes:
       - ./file_service:/app
-      - ./uploads:/app/../uploads
+      - ./common:/common
+      - ./uploads:/uploads
     restart: unless-stopped
 
   rtc_service:
@@ -48,7 +50,8 @@ services:
       - "3005:3005"
     volumes:
       - ./rtc_service:/app
-      - ./db:/app/../db
+      - ./common:/common
+      - ./db:/db
     restart: unless-stopped
 
   notification_service:
@@ -58,5 +61,6 @@ services:
       - "3006:3006"
     volumes:
       - ./notification_service:/app
-      - ./db:/app/../db
+      - ./common:/common
+      - ./db:/db
     restart: unless-stopped

@@ -16,11 +16,35 @@ from pydantic import BaseModel, EmailStr, constr
 
 from dotenv import load_dotenv
 
-import jwt  # 新增
-from datetime import datetime, timedelta  # 新增
+import jwt
+from datetime import datetime, timedelta
+
+# 自动判断运行环境并设置路径
+def get_paths():
+    current_dir = os.path.dirname(__file__)
+    
+    # 判断是否在容器内运行（容器内通常有这些特征）
+    is_container = os.path.exists('/app') and os.path.exists('/common')
+    
+    if is_container:
+        # 容器内路径
+        return {
+            'env_path': '/common/.env',
+            'db_path': '/db/server.db',
+            'common_path': '/common'
+        }
+    else:
+        # 本地开发路径
+        return {
+            'env_path': os.path.join(current_dir, '..', 'common', '.env'),
+            'db_path': os.path.join(current_dir, '..', 'db', 'server.db'),
+            'common_path': os.path.join(current_dir, '..', 'common')
+        }
+
+paths = get_paths()
 
 # 加载.env配置
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+load_dotenv(dotenv_path=paths['env_path'])
 
 SECRET_KEY = os.getenv("SECRET_KEY", "thisisaverysecretkey12345678")
 EMAIL_USER = os.getenv("EMAIL_USER")
@@ -29,13 +53,13 @@ SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.qq.com")
 VERICODE = int(os.getenv("VERICODE", 600))
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 60 * 24 * 7))  # 默认7天
 
-# 数据库路径（可根据实际情况调整）
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "db", "server.db"))
+# 数据库路径
+DB_PATH = paths['db_path']
 
-# 导入数据库相关函数（假设你把数据库相关函数放在 server/Database.py）
+# 导入数据库相关函数
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import database as database
+sys.path.append(paths['common_path'])
+import database
 
 database.init(DB_PATH)
 
