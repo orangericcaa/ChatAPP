@@ -5,6 +5,7 @@ import random
 import hashlib
 import threading
 import smtplib
+import uuid
 from email.mime.text import MIMEText
 from email.header import Header
 
@@ -98,6 +99,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 vericode_dict = {}
 vericode_dict_lock = threading.Lock()
 
+# 用户会话存储（简单的多端登录检测，生产环境建议用Redis）
+user_sessions = {}
+user_sessions_lock = threading.Lock()
+
 # ------------------- Pydantic 数据模型 -------------------
 
 class RegisterRequest(BaseModel):
@@ -117,6 +122,10 @@ class CodeLoginRequest(BaseModel):
 class CodeRequest(BaseModel):
     email: EmailStr
 
+class TerminateSessionRequest(BaseModel):
+    email: EmailStr
+    current_session_token: str
+
 # ------------------- JWT 相关函数 -------------------
 
 def create_jwt_token(email: str, username: str = "", expire_minutes: int = JWT_EXPIRE_MINUTES):
@@ -129,6 +138,40 @@ def create_jwt_token(email: str, username: str = "", expire_minutes: int = JWT_E
     }
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     return token
+
+def generate_session_token():
+    """生成唯一的会话token"""
+    return str(uuid.uuid4())
+
+def check_multi_login(email: str):
+    """检查用户是否有多端登录"""
+    with user_sessions_lock:
+        return email in user_sessions and len(user_sessions[email]) > 0
+
+def add_user_session(email: str, session_token: str):
+    """添加用户会话"""
+    with user_sessions_lock:
+        if email not in user_sessions:
+            user_sessions[email] = []
+        user_sessions[email].append({
+            'session_token': session_token,
+            'login_time': datetime.utcnow(),
+            'device_info': 'web'  # 可以扩展为更详细的设备信息
+        })
+
+def remove_user_sessions(email: str, keep_session_token: str = None):
+    """移除用户的其他会话"""
+    with user_sessions_lock:
+        if email in user_sessions:
+            if keep_session_token:
+                # 只保留当前会话
+                user_sessions[email] = [
+                    session for session in user_sessions[email] 
+                    if session['session_token'] == keep_session_token
+                ]
+            else:
+                # 移除所有会话
+                del user_sessions[email]
 
 # ------------------- 邮件发送函数 -------------------
 
@@ -165,23 +208,60 @@ def register(data: RegisterRequest):
         code_info = vericode_dict.get(data.email)
         if not code_info or code_info[0] != data.vericode or time.time() - code_info[1] > VERICODE:
             raise HTTPException(status_code=400, detail="验证码无效或已过期")
+    
     if database.find_user(DB_PATH, data.email):
         raise HTTPException(status_code=400, detail="邮箱已注册")
+    
     pwdhash = hashlib.sha256(data.password.encode('utf-8')).hexdigest()
     database.register_user(DB_PATH, data.email, data.username, pwdhash)
-    # 注册成功后直接生成token返回
+    
+    # 注册成功后直接生成token和会话
     token = create_jwt_token(data.email, data.username)
-    return api_response(True, {"token": token}, "注册成功")
+    session_token = generate_session_token()
+    add_user_session(data.email, session_token)
+    
+    # 修复：返回完整用户信息结构
+    return api_response(True, {
+        "token": token,
+        "user": {
+            "email": data.email,
+            "name": data.username,
+            "username": data.username  # 兼容前端的两种字段名
+        },
+        "session_token": session_token,
+        "multi_login_detected": False  # 新注册用户不会有多端登录
+    }, "注册成功")
 
 @app.post("/api/v1/auth/login")
 def login(data: LoginRequest):
     pwdhash = database.get_pwdhash(DB_PATH, data.email)
     if not pwdhash or pwdhash != hashlib.sha256(data.password.encode('utf-8')).hexdigest():
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
-    # 登录成功生成token
+    
     username = database.get_username(DB_PATH, data.email) or ""
+    
+    # 检查多端登录
+    multi_login_detected = check_multi_login(data.email)
+    
+    # 生成新的会话
     token = create_jwt_token(data.email, username)
-    return api_response(True, {"token": token}, "登录成功")
+    session_token = generate_session_token()
+    
+    # 修复：返回完整用户信息结构
+    response_data = {
+        "token": token,
+        "user": {
+            "email": data.email,
+            "name": username,
+            "username": username  # 兼容前端的两种字段名
+        },
+        "session_token": session_token,
+        "multi_login_detected": multi_login_detected
+    }
+    
+    add_user_session(data.email, session_token)
+    
+    return api_response(True, response_data, "登录成功")
 
 @app.post("/api/v1/auth/login-with-code")
 def login_with_code(data: CodeLoginRequest):
@@ -189,11 +269,64 @@ def login_with_code(data: CodeLoginRequest):
         code_info = vericode_dict.get(data.email)
         if not code_info or code_info[0] != data.code or time.time() - code_info[1] > VERICODE:
             raise HTTPException(status_code=400, detail="验证码无效或已过期")
+    
     if not database.find_user(DB_PATH, data.email):
         raise HTTPException(status_code=401, detail="用户不存在")
+    
     username = database.get_username(DB_PATH, data.email) or ""
+    
+    # 检查多端登录
+    multi_login_detected = check_multi_login(data.email)
+    
+    # 生成新的会话
     token = create_jwt_token(data.email, username)
-    return api_response(True, {"token": token}, "登录成功")
+    session_token = generate_session_token()
+    
+    # 修复：返回完整用户信息结构
+    response_data = {
+        "token": token,
+        "user": {
+            "email": data.email,
+            "name": username,
+            "username": username  # 兼容前端的两种字段名
+        },
+        "session_token": session_token,
+        "multi_login_detected": multi_login_detected
+    }
+    
+    add_user_session(data.email, session_token)
+    
+    return api_response(True, response_data, "登录成功")
+
+# 新增：终止其他会话的接口
+@app.post("/api/v1/auth/terminate-other-sessions")
+def terminate_other_sessions(data: TerminateSessionRequest):
+    """终止用户的其他登录会话，只保留当前会话"""
+    try:
+        remove_user_sessions(data.email, data.current_session_token)
+        # 如果当前会话token不为空，需要重新添加当前会话
+        if data.current_session_token:
+            add_user_session(data.email, data.current_session_token)
+        return api_response(True, None, "已终止其他设备的登录")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="终止其他会话失败")
+
+# 新增：获取用户会话列表（可选）
+@app.get("/api/v1/auth/sessions")
+def get_user_sessions(email: str):
+    """获取用户的所有活跃会话"""
+    with user_sessions_lock:
+        sessions = user_sessions.get(email, [])
+        return api_response(True, {
+            "sessions": [
+                {
+                    "session_token": session["session_token"][:8] + "...",  # 只显示部分token
+                    "login_time": session["login_time"].isoformat(),
+                    "device_info": session["device_info"]
+                }
+                for session in sessions
+            ]
+        }, "获取会话列表成功")
 
 # 可选：token校验、刷新等接口
 @app.post("/api/v1/auth/verify")
@@ -208,5 +341,19 @@ def refresh_token():
 
 @app.post("/api/v1/auth/logout")
 def logout():
-    # 这里可以实现登出逻辑（如黑名单token等）
+    # 这里可以实现登出逻辑（如清除用户会话等）
     return api_response(True, None, "已登出")
+
+# 新增：健康检查接口
+@app.get("/api/v1/auth/health")
+def health_check():
+    return api_response(True, {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}, "服务正常")
+
+if __name__ == "__main__":
+    print(f"数据库路径: {DB_PATH}")
+    print(f"环境变量路径: {paths['env_path']}")
+    print(f"邮箱配置: {EMAIL_USER}")
+    print("认证服务启动中...")
+
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=3002)
